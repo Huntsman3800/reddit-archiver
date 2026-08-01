@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reddit Archive</title>
+<style>
+  :root {
+    --accent:#ff4500; --accent-dim:#e03d00;
+    --bg:#0f0f10; --card:#1a1a1b; --card-hi:#232324;
+    --fg:#d7dadc; --muted:#8a8a8a; --border:#2a2a2b;
+    --ok:#46a758;
+    --sidebar-w:236px; --panel-w:360px;
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body {
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    font-size:14px; -webkit-font-smoothing:antialiased;
+  }
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-track { background:var(--bg); }
+  ::-webkit-scrollbar-thumb { background:#333; border-radius:5px; }
+  ::-webkit-scrollbar-thumb:hover { background:#444; }
+
+  /* ---------- Sidebar ---------- */
+  #sidebar {
+    position:fixed; left:0; top:0; bottom:0; width:var(--sidebar-w);
+    overflow-y:auto; background:var(--card); border-right:1px solid var(--border);
+    padding:20px 12px; z-index:20;
+  }
+  .brand { font-size:17px; font-weight:700; padding:0 8px 4px; letter-spacing:-.2px; }
+  .brand span { color:var(--accent); }
+  .brand-sub { font-size:11px; color:var(--muted); padding:0 8px 18px; }
+  .side-title {
+    font-size:10px; text-transform:uppercase; letter-spacing:.7px;
+    color:var(--muted); margin:18px 8px 8px; font-weight:700;
+  }
+  .side-row {
+    display:flex; justify-content:space-between; align-items:center; gap:8px;
+    padding:7px 9px; border-radius:6px; cursor:pointer; font-size:12.5px;
+    user-select:none; transition:background .1s;
+  }
+  .side-row:hover { background:var(--card-hi); }
+  .side-row.active { background:var(--accent); color:#fff; font-weight:600; }
+  .side-count { color:var(--muted); font-size:11px; flex-shrink:0; }
+  .side-row.active .side-count { color:#ffdccd; }
+  .side-row span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .side-empty { color:var(--muted); font-size:11.5px; line-height:1.55; padding:0 9px; }
+  .star {
+    position:absolute; top:7px; right:7px; font-size:17px; cursor:pointer;
+    color:rgba(255,255,255,.5); text-shadow:0 1px 6px rgba(0,0,0,.9);
+    line-height:1; z-index:2; transition:color .12s, transform .12s;
+  }
+  .star:hover { color:#fff; transform:scale(1.15); }
+  .star.on { color:#ffc531; }
+  .star.inline { position:static; font-size:14px; margin-left:auto; text-shadow:none; }
+
+  .lb-actions {
+    margin:16px 0; padding:14px 0; border-top:1px solid var(--border);
+    border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:8px;
+  }
+  .act {
+    background:transparent; border:1px solid var(--border); color:var(--fg);
+    border-radius:7px; padding:7px 12px; font-size:12.5px; cursor:pointer;
+    font-family:inherit; transition:all .12s;
+  }
+  .act:hover { border-color:#555; background:var(--card-hi); }
+  .act.on { color:#ffc531; border-color:#5a4a1a; }
+  .act.danger:hover { border-color:#8c3a2c; color:#e07a63; background:#241716; }
+  .tag-row { width:100%; }
+  #tag-input {
+    width:100%; padding:7px 10px; border-radius:7px; border:1px solid var(--border);
+    background:#000; color:var(--fg); font-size:12.5px; outline:none; font-family:inherit;
+  }
+  #tag-input:focus { border-color:var(--accent); }
+  .tag-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .tag {
+    background:var(--card-hi); border:1px solid var(--border); border-radius:12px;
+    padding:3px 9px; font-size:11.5px; cursor:pointer;
+  }
+  .tag:hover { border-color:#8c3a2c; }
+  .tag .x { opacity:.5; }
+
+  /* ---------- Header ---------- */
+  #content { margin-left:var(--sidebar-w); }
+  header {
+    position:sticky; top:0; z-index:15; background:rgba(15,15,16,.94);
+    backdrop-filter:blur(12px); border-bottom:1px solid var(--border);
+    padding:14px 22px;
+  }
+  .row1 { display:flex; gap:10px; align-items:center; margin-bottom:10px; }
+  #search {
+    flex:1; min-width:160px; padding:9px 12px; border-radius:8px;
+    border:1px solid var(--border); background:#000; color:var(--fg); font-size:13px;
+    outline:none; transition:border-color .12s;
+  }
+  #search:focus { border-color:var(--accent); }
+  select {
+    padding:9px 10px; border-radius:8px; border:1px solid var(--border);
+    background:#000; color:var(--fg); font-size:12.5px; outline:none; cursor:pointer;
+  }
+  .row2 { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip {
+    padding:5px 11px; border-radius:14px; border:1px solid var(--border);
+    cursor:pointer; font-size:12px; user-select:none; background:transparent;
+    color:var(--muted); transition:all .12s; white-space:nowrap;
+  }
+  .chip:hover { border-color:#444; color:var(--fg); }
+  .chip.active { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .chip.ghost.active { background:var(--card-hi); border-color:#555; color:var(--fg); }
+  .chip.filter-chip { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .count-note { margin-left:auto; font-size:11.5px; color:var(--muted); white-space:nowrap; }
+
+  /* ---------- Grid ---------- */
+  main { padding:18px 22px 60px; }
+  .group-title {
+    font-size:11px; text-transform:uppercase; letter-spacing:.7px; color:var(--muted);
+    margin:26px 0 12px; font-weight:700; display:flex; align-items:center; gap:10px;
+  }
+  .group-title::after { content:""; flex:1; height:1px; background:var(--border); }
+  .group-title:first-child { margin-top:4px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(215px,1fr)); gap:14px; }
+  .card {
+    background:var(--card); border:1px solid var(--border); border-radius:10px;
+    overflow:hidden; display:flex; flex-direction:column;
+    transition:border-color .12s, transform .12s;
+  }
+  .card:hover { border-color:#3a3a3b; transform:translateY(-2px); }
+  .card { cursor:pointer; }
+  .thumb-wrap { position:relative; background:#000; }
+  .thumb { width:100%; aspect-ratio:1; object-fit:cover; display:block; }
+  .thumb.blurred { filter:blur(22px); }
+  .badge {
+    position:absolute; top:7px; right:7px; background:rgba(0,0,0,.7);
+    color:#fff; font-size:10.5px; padding:3px 7px; border-radius:5px;
+    display:flex; align-items:center; gap:4px; font-weight:600;
+  }
+  .badge.left { left:7px; right:auto; }
+  .play-overlay {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:30px; color:#fff; text-shadow:0 2px 12px rgba(0,0,0,.8);
+    background:linear-gradient(transparent 55%, rgba(0,0,0,.35));
+    pointer-events:none; transition:opacity .12s; opacity:.92;
+  }
+  .card:hover .play-overlay { opacity:1; }
+  .nsfw-tag { background:var(--accent); }
+  .card-body { padding:10px 12px 11px; display:flex; flex-direction:column; gap:5px; flex:1; }
+  .card-title { font-size:13px; font-weight:600; line-height:1.35; }
+  .card-meta { font-size:11px; color:var(--muted); line-height:1.4; }
+  .author-link { color:#a8b3bd; cursor:pointer; }
+  .author-link:hover { color:var(--accent); text-decoration:underline; }
+  .card-text {
+    font-size:12px; color:#b9bec2; line-height:1.45; white-space:pre-wrap;
+    display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .card-foot { margin-top:auto; padding-top:4px; display:flex; gap:10px; align-items:center; font-size:11px; }
+  .card-foot a { color:var(--accent); text-decoration:none; }
+  .card-foot a:hover { text-decoration:underline; }
+  .stat { color:var(--muted); }
+  .stat.gone { color:#c0674a; }
+  .empty { color:var(--muted); text-align:center; padding:80px 20px; line-height:1.6; }
+  .empty b { color:var(--fg); display:block; font-size:16px; margin-bottom:6px; }
+  #sentinel { height:1px; }
+  .loading { text-align:center; color:var(--muted); padding:26px; font-size:12px; }
+
+  /* ---------- Lightbox ---------- */
+  .lightbox { position:fixed; inset:0; background:#000; z-index:100; display:flex; }
+  .lightbox.hidden { display:none; }
+  .lb-main {
+    flex:1; position:relative; display:flex; align-items:center;
+    justify-content:center; background:#141415; min-width:0;
+  }
+  .lb-media { max-width:calc(100% - 120px); max-height:92vh; object-fit:contain; display:block; }
+  .lb-textview {
+    max-width:min(680px, calc(100% - 140px)); max-height:86vh; overflow-y:auto;
+    padding:32px 34px; background:var(--card); border:1px solid var(--border);
+    border-radius:12px;
+  }
+  .lb-textview-title { font-size:20px; font-weight:650; line-height:1.35; margin-bottom:14px; }
+  .lb-textview-body { font-size:14.5px; line-height:1.65; white-space:pre-wrap; color:#c3c8cb; }
+  .lb-nav {
+    position:absolute; background:rgba(255,255,255,.09); color:#fff; border:none;
+    border-radius:50%; cursor:pointer; display:flex; align-items:center;
+    justify-content:center; transition:background .12s; z-index:2;
+  }
+  .lb-nav:hover { background:rgba(255,255,255,.22); }
+  .lb-nav[disabled] { opacity:0; pointer-events:none; }
+  .lb-nav.side { top:50%; transform:translateY(-50%); width:50px; height:50px; font-size:26px; }
+  .lb-prev { left:14px; } .lb-next { right:14px; }
+  .lb-nav.vert { left:50%; transform:translateX(-50%); width:40px; height:40px; font-size:17px; }
+  .lb-up { top:14px; } .lb-down { bottom:14px; }
+  .lb-close {
+    position:absolute; top:12px; right:14px; background:rgba(0,0,0,.5); color:#fff;
+    border:none; font-size:20px; cursor:pointer; z-index:3; width:36px; height:36px;
+    border-radius:50%;
+  }
+  .lb-close:hover { background:rgba(255,255,255,.2); }
+  .lb-counter {
+    position:absolute; bottom:14px; left:16px; color:#999; font-size:11.5px;
+    background:rgba(0,0,0,.55); padding:5px 10px; border-radius:6px;
+  }
+  .lb-panel {
+    width:var(--panel-w); flex-shrink:0; background:var(--card);
+    border-left:1px solid var(--border); padding:22px; overflow-y:auto;
+  }
+  .lb-title { font-size:16px; font-weight:650; margin-bottom:8px; line-height:1.35; }
+  .lb-meta { font-size:12px; color:var(--muted); margin-bottom:14px; line-height:1.6; }
+  .lb-desc {
+    font-size:13px; line-height:1.55; white-space:pre-wrap; color:#c3c8cb;
+    margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border);
+  }
+  .lb-links a { color:var(--accent); text-decoration:none; font-size:12.5px; }
+  .lb-links a:hover { text-decoration:underline; }
+  .muted-note { color:var(--muted); font-size:12.5px; }
+
+  /* ---------- Comments ---------- */
+  .comments-head {
+    font-size:11px; text-transform:uppercase; letter-spacing:.7px; color:var(--muted);
+    font-weight:700; margin:18px 0 10px;
+  }
+  .cmt { margin-bottom:11px; font-size:12.5px; line-height:1.5; }
+  .cmt-head { color:var(--muted); font-size:11px; margin-bottom:3px; }
+  .cmt-author { color:#9aa7b1; font-weight:600; }
+  .cmt-body { white-space:pre-wrap; color:#c3c8cb; }
+  .cmt-children {
+    margin-left:10px; padding-left:10px; border-left:2px solid var(--border);
+    margin-top:8px;
+  }
+  .cmt-toggle {
+    cursor:pointer; color:var(--muted); font-size:10.5px; user-select:none;
+    border:1px solid var(--border); border-radius:4px; padding:0 5px; margin-right:5px;
+  }
+  .cmt-toggle:hover { color:var(--fg); border-color:#444; }
+
+  @media (max-width:900px) {
+    #sidebar { display:none; }
+    #content { margin-left:0; }
+    .lb-panel { display:none; }
+    .lb-media { max-width:100%; }
+  }
+</style>
+</head>
+<body>
+
+<aside id="sidebar">
+  <div class="brand">Reddit <span>Archive</span></div>
+  <div class="brand-sub" id="brand-sub">Loading…</div>
+
+  <div class="side-title">Source</div>
+  <div id="source-list"></div>
+
+  <div class="side-title">Snapshotted creators</div>
+  <div id="creator-list"></div>
+  <div id="tag-sidebar"></div>
+</aside>
+
+<div id="content">
+  <header>
+    <div class="row1">
+      <input type="text" id="search" placeholder="Search titles, text, subreddits, authors…" />
+      <select id="group-by">
+        <option value="posted">Group by month posted</option>
+        <option value="year">Group by year posted</option>
+        <option value="user">Group by author</option>
+        <option value="subreddit">Group by subreddit</option>
+        <option value="type">Group by type</option>
+        <option value="none">No grouping</option>
+      </select>
+    </div>
+    <div class="row2">
+      <div class="chips" id="type-chips">
+        <span class="chip active" data-type="all">All</span>
+        <span class="chip active" data-type="post">Posts</span>
+        <span class="chip active" data-type="video">Videos</span>
+        <span class="chip active" data-type="comment">Comments</span>
+      </div>
+      <div class="chips">
+        <span class="chip ghost" id="fav-btn">★ Favourites</span>
+        <span class="chip ghost" id="shuffle-btn">Shuffle</span>
+        <span class="chip ghost" id="blur-btn">Blur NSFW</span>
+      </div>
+      <div class="chips" id="filter-chip-wrap"></div>
+      <div class="count-note" id="count-note"></div>
+    </div>
+  </header>
+  <main id="main"></main>
+  <div id="sentinel"></div>
+</div>
+
+<div class="lightbox hidden" id="lightbox">
+  <div class="lb-main">
+    <button class="lb-close" id="lb-close" title="Close (Esc)">✕</button>
+    <button class="lb-nav vert lb-up" id="lb-up" title="Previous post (↑)">▲</button>
+    <button class="lb-nav side lb-prev" id="lb-prev" title="Previous media (←)">‹</button>
+    <div id="lb-content"></div>
+    <button class="lb-nav side lb-next" id="lb-next" title="Next media (→)">›</button>
+    <button class="lb-nav vert lb-down" id="lb-down" title="Next post (↓)">▼</button>
+    <div class="lb-counter" id="lb-counter"></div>
+  </div>
+  <div class="lb-panel" id="lb-panel">
+    <div class="lb-title" id="lb-title"></div>
+    <div class="lb-meta" id="lb-meta"></div>
+    <div class="lb-desc" id="lb-desc"></div>
+    <div class="lb-links" id="lb-links"></div>
+    <div class="lb-actions" id="lb-actions">
+      <button class="act" id="act-fav">★ Favourite</button>
+      <div class="tag-row">
+        <input type="text" id="tag-input" placeholder="add a tag + Enter" />
+        <div class="tag-list" id="tag-list"></div>
+      </div>
+    </div>
+    <div id="lb-comments"></div>
+  </div>
+</div>
+
+<script src="library-data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var ITEMS = (window.LIBRARY_DATA || []).slice();
+  var BATCH = 60;               // cards appended per scroll step
+
+  var $ = function (id) { return document.getElementById(id); };
+  var main = $('main'), search = $('search'), groupSel = $('group-by');
+  var typeChips = $('type-chips'), filterWrap = $('filter-chip-wrap');
+  var creatorList = $('creator-list'), sourceList = $('source-list');
+  var countNote = $('count-note'), sentinel = $('sentinel');
+  var shuffleBtn = $('shuffle-btn'), blurBtn = $('blur-btn');
+
+  var activeTypes = new Set(['post', 'video', 'comment']);
+  var authorFilter = null, sourceFilter = 'all';
+  var randomOrder = false, shuffled = null, blurNsfw = false;
+  var favOnly = false, tagFilter = null;
+
+  // Stars and tags live in localStorage, so this page needs nothing but a
+  // browser -- no server, no app running. Deleting is deliberately NOT here:
+  // it is a filesystem operation and belongs in the app's Manage archive
+  // window, where you can see sizes and counts before removing anything.
+  var STORE_KEY = 'redditArchiver.userData';
+  var favorites = new Set();
+  var tags = {};            // post id -> array of tag names
+
+  var renderQueue = [];   // flat list of {header} / {item} to append lazily
+  var queueAt = 0;
+  var currentGrid = null;
+  var postGroups = [];    // openable items, in display order
+
+  // ---------- helpers ----------
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // Filenames contain spaces, '#', and non-ASCII characters. Encoding each
+  // path segment separately keeps the '/' separators intact.
+  function mediaUrl(dir, file) {
+    var parts = (dir ? dir.split('/') : []).concat([file]);
+    return parts.map(encodeURIComponent).join('/');
+  }
+
+  function fmtDate(ms) {
+    if (!ms) return 'unknown date';
+    var d = new Date(ms);
+    return isNaN(d) ? 'unknown date' : d.toISOString().slice(0, 10);
+  }
+
+  function fmtMonth(sec) {
+    if (!sec) return 'unknown';
+    var d = new Date(sec * 1000);
+    return isNaN(d) ? 'unknown' : d.toISOString().slice(0, 7);
+  }
+
+  function postedTs(item) {
+    return item.created_utc ? item.created_utc * 1000 : (item.archived_ms || 0);
+  }
+
+  function groupKeyFor(item, mode) {
+    if (mode === 'user') return item.author || item.username || 'unknown';
+    if (mode === 'subreddit') return item.subreddit ? 'r/' + item.subreddit : 'unknown';
+    if (mode === 'type') return item.type;
+    if (mode === 'year') return fmtMonth(item.created_utc).slice(0, 4);
+    return fmtMonth(item.created_utc);   // 'posted', the default
+  }
+
+  function matchesSearch(item, q) {
+    if (!q) return true;
+    var hay = [item.title, item.body, item.selftext, item.subreddit,
+               item.author, item.username, item.link_title]
+      .filter(Boolean).join(' ').toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }
+
+  function passes(item, q) {
+    if (!activeTypes.has(item.type)) return false;
+    if (sourceFilter !== 'all' && item.source !== sourceFilter) return false;
+    if (authorFilter && item.author !== authorFilter && item.username !== authorFilter) return false;
+    if (favOnly && !favorites.has(item.id)) return false;
+    if (tagFilter && (tags[item.id] || []).indexOf(tagFilter) === -1) return false;
+    return matchesSearch(item, q);
+  }
+
+  // ---- favorites / tags persistence ----
+
+  function loadUserData() {
+    try {
+      var stored = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+      favorites = new Set(stored.favorites || []);
+      tags = stored.tags || {};
+    } catch (e) {
+      // Private-browsing mode and cleared storage both land here. Stars are a
+      // convenience, so degrade quietly rather than breaking the page.
+      favorites = new Set();
+      tags = {};
+    }
+  }
+
+  function saveUserData() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        favorites: Array.from(favorites), tags: tags
+      }));
+    } catch (e) { /* storage full or unavailable; nothing else to do */ }
+  }
+
+  function toggleFavorite(id) {
+    if (favorites.has(id)) favorites.delete(id); else favorites.add(id);
+    saveUserData();
+  }
+
+  function allTags() {
+    var counts = new Map();
+    for (var id in tags) {
+      if (!Object.prototype.hasOwnProperty.call(tags, id)) continue;
+      tags[id].forEach(function (t) { counts.set(t, (counts.get(t) || 0) + 1); });
+    }
+    return counts;
+  }
+
+
+  function shuffleArr(a) {
+    a = a.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  // ---------- sidebar ----------
+
+  function renderSidebar() {
+    var counts = { all: ITEMS.length, saved: 0, 'profile-snapshot': 0 };
+    var creators = new Map();
+    var i, it;
+
+    // Any name that appears as a snapshotted creator is a sidebar entry.
+    var names = new Set();
+    for (i = 0; i < ITEMS.length; i++) {
+      if (ITEMS[i].username) names.add(ITEMS[i].username);
+    }
+
+    // Count with exactly the predicate passes() filters by, or the number in
+    // the sidebar disagrees with the number of cards you get when you click it.
+    // Deduping can leave a row with source 'saved' but a creator's username on
+    // it, and counting only profile-snapshot rows undercounted those.
+    for (i = 0; i < ITEMS.length; i++) {
+      it = ITEMS[i];
+      if (counts[it.source] !== undefined) counts[it.source]++;
+      if (it.author && names.has(it.author)) {
+        creators.set(it.author, (creators.get(it.author) || 0) + 1);
+      }
+      if (it.username && it.username !== it.author && names.has(it.username)) {
+        creators.set(it.username, (creators.get(it.username) || 0) + 1);
+      }
+    }
+
+    $('brand-sub').textContent = ITEMS.length.toLocaleString() + ' items archived';
+
+    var sources = [
+      ['all', 'Everything'], ['saved', 'Saved'], ['profile-snapshot', 'Profile snapshots']
+    ];
+    sourceList.innerHTML = sources.map(function (s) {
+      return '<div class="side-row' + (sourceFilter === s[0] ? ' active' : '') +
+        '" data-source="' + s[0] + '"><span>' + s[1] + '</span>' +
+        '<span class="side-count">' + (counts[s[0]] || 0) + '</span></div>';
+    }).join('');
+
+    if (creators.size === 0) {
+      creatorList.innerHTML = '<div class="side-empty">No profile snapshots yet. ' +
+        'Use “Snapshot profile” in the app to archive a creator’s posts.</div>';
+      return;
+    }
+    var names = Array.from(creators.keys()).sort(function (a, b) {
+      return creators.get(b) - creators.get(a);
+    });
+    creatorList.innerHTML = names.map(function (n) {
+      return '<div class="side-row' + (authorFilter === n ? ' active' : '') +
+        '" data-creator="' + escapeHtml(n) + '"><span>u/' + escapeHtml(n) + '</span>' +
+        '<span class="side-count">' + creators.get(n) + '</span></div>';
+    }).join('');
+
+    renderTagSidebar();
+  }
+
+  function renderTagSidebar() {
+    var box = $('tag-sidebar');
+    var counts = allTags();
+    if (!counts.size) { box.innerHTML = ''; return; }
+    var names = Array.from(counts.keys()).sort();
+    box.innerHTML = '<div class="side-title">Tags</div>' + names.map(function (t) {
+      return '<div class="side-row' + (tagFilter === t ? ' active' : '') +
+        '" data-tag-filter="' + escapeHtml(t) + '"><span>' + escapeHtml(t) +
+        '</span><span class="side-count">' + counts.get(t) + '</span></div>';
+    }).join('');
+  }
+
+  sourceList.addEventListener('click', function (e) {
+    var row = e.target.closest('[data-source]');
+    if (!row) return;
+    sourceFilter = row.dataset.source;
+    render();
+  });
+  creatorList.addEventListener('click', function (e) {
+    var row = e.target.closest('[data-creator]');
+    if (!row) return;
+    authorFilter = authorFilter === row.dataset.creator ? null : row.dataset.creator;
+    render();
+  });
+
+  document.getElementById('tag-sidebar').addEventListener('click', function (e) {
+    var row = e.target.closest('[data-tag-filter]');
+    if (!row) return;
+    tagFilter = tagFilter === row.dataset.tagFilter ? null : row.dataset.tagFilter;
+    render();
+  });
+
+  function renderFilterChip() {
+    filterWrap.innerHTML = '';
+    if (!authorFilter) return;
+    var chip = document.createElement('span');
+    chip.className = 'chip filter-chip';
+    chip.innerHTML = 'u/' + escapeHtml(authorFilter) + ' ✕';
+    chip.addEventListener('click', function () { authorFilter = null; render(); });
+    filterWrap.appendChild(chip);
+  }
+
+  // ---------- cards ----------
+
+  function cardFor(item) {
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.postGroup = item.__gi;   // whole card opens the lightbox
+
+    var authorHtml = item.author
+      ? '<span class="author-link" data-author="' + escapeHtml(item.author) + '">u/' +
+        escapeHtml(item.author) + '</span>'
+      : '<span class="author-link">u/unknown</span>';
+
+    if (item.type === 'comment') {
+      card.innerHTML =
+        '<div class="card-body">' +
+          '<div class="card-meta">' + authorHtml + ' · r/' + escapeHtml(item.subreddit) +
+            ' · <b>comment</b></div>' +
+          '<div class="card-text">' + escapeHtml(item.body) + '</div>' +
+          '<div class="card-meta">on: ' + escapeHtml(item.link_title || '—') + '</div>' +
+          '<div class="card-foot">' +
+            (item.permalink ? '<a href="' + escapeHtml(item.permalink) +
+              '" target="_blank" rel="noopener">Open on Reddit</a>' : '') +
+            '<span class="stat">' + (item.score || 0) + ' pts</span>' +
+          '</div>' +
+        '</div>';
+      return card;
+    }
+
+    var media = item.media || [];
+    var first = media[0];
+
+    if (first) {
+      var wrap = document.createElement('div');
+      wrap.className = 'thumb-wrap';
+      wrap.dataset.postGroup = item.__gi;
+
+      if (first.v && first.p) {
+        // Videos show a poster frame extracted by ffmpeg, not a <video> element.
+        // A grid of <video> tags either stalls the browser (preload) or paints
+        // solid black (preload="none") -- an <img> does neither.
+        var poster = document.createElement('img');
+        poster.className = 'thumb' + (blurNsfw && item.nsfw ? ' blurred' : '');
+        poster.loading = 'lazy'; poster.decoding = 'async';
+        poster.src = mediaUrl(item.dir, first.p);
+        poster.alt = item.title || '';
+        wrap.appendChild(poster);
+      } else if (first.v) {
+        // No poster on disk yet; fall back to the video itself.
+        var vid = document.createElement('video');
+        vid.className = 'thumb' + (blurNsfw && item.nsfw ? ' blurred' : '');
+        vid.src = mediaUrl(item.dir, first.f) + '#t=0.5';
+        vid.muted = true; vid.preload = 'metadata'; vid.playsInline = true;
+        wrap.appendChild(vid);
+      } else {
+        var img = document.createElement('img');
+        img.className = 'thumb' + (blurNsfw && item.nsfw ? ' blurred' : '');
+        img.loading = 'lazy'; img.decoding = 'async';
+        img.src = mediaUrl(item.dir, first.f);
+        img.alt = item.title || '';
+        wrap.appendChild(img);
+      }
+
+      var badges = '';
+      if (first.v) badges += '<div class="play-overlay">▶</div>';
+      if (media.length > 1) badges += '<div class="badge left">' + media.length + ' items</div>';
+      badges += '<div class="star' + (favorites.has(item.id) ? ' on' : '') +
+                '" data-fav="' + escapeHtml(item.id) + '" title="Favourite">★</div>';
+      wrap.insertAdjacentHTML('beforeend', badges);
+      card.appendChild(wrap);
+    }
+
+    var extra = item.username
+      ? ' · from <span class="author-link" data-author="' + escapeHtml(item.username) +
+        '">u/' + escapeHtml(item.username) + '</span>'
+      : '';
+
+    var body = document.createElement('div');
+    body.className = 'card-body';
+    body.innerHTML =
+      '<div class="card-title">' + escapeHtml(item.title) + '</div>' +
+      '<div class="card-meta">' + authorHtml + ' · r/' + escapeHtml(item.subreddit) + extra + '</div>' +
+      (item.selftext ? '<div class="card-text">' + escapeHtml(item.selftext) + '</div>' : '') +
+      '<div class="card-foot">' +
+        (item.permalink ? '<a href="' + escapeHtml(item.permalink) +
+          '" target="_blank" rel="noopener">Reddit</a>' : '') +
+        '<span class="stat">' + (item.score || 0) + ' pts</span>' +
+        (item.ncomments ? '<span class="stat">' + item.ncomments + ' comments</span>' : '') +
+        (!first ? '<span class="stat' + (item.media_error ? ' gone' : '') + '">' +
+          escapeHtml(item.media_error ? 'media ' + item.media_error : 'no media') +
+          '</span>' : '') +
+        // Cards with no thumbnail have nowhere to put the overlay star.
+        (!first ? '<span class="star inline' + (favorites.has(item.id) ? ' on' : '') +
+          '" data-fav="' + escapeHtml(item.id) + '" title="Favourite">★</span>' : '') +
+      '</div>';
+    card.appendChild(body);
+    return card;
+  }
+
+  // ---------- render + lazy append ----------
+
+  function render() {
+    renderSidebar();
+    renderFilterChip();
+    shuffleBtn.classList.toggle('active', randomOrder);
+    blurBtn.classList.toggle('active', blurNsfw);
+    $('fav-btn').classList.toggle('active', favOnly);
+
+    main.innerHTML = '';
+    renderQueue = [];
+    queueAt = 0;
+    currentGrid = null;
+    postGroups = [];
+
+    var q = search.value.trim().toLowerCase();
+    var source = randomOrder && shuffled ? shuffled : ITEMS;
+    var filtered = [];
+    for (var i = 0; i < source.length; i++) {
+      if (passes(source[i], q)) filtered.push(source[i]);
+    }
+
+    countNote.textContent = filtered.length.toLocaleString() + ' of ' +
+      ITEMS.length.toLocaleString() + ' shown';
+
+    if (!filtered.length) {
+      main.innerHTML = '<div class="empty"><b>Nothing matches</b>' +
+        'Try a different search, or clear the filters above.</div>';
+      return;
+    }
+
+    var mode = randomOrder ? 'none' : groupSel.value;
+
+    if (mode === 'none') {
+      queueItems(randomOrder ? 'Randomized' : null, filtered);
+    } else {
+      var groups = new Map();
+      for (var j = 0; j < filtered.length; j++) {
+        var key = groupKeyFor(filtered[j], mode);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(filtered[j]);
+      }
+      var keys = Array.from(groups.keys()).sort();
+      if (mode === 'posted' || mode === 'year') keys.reverse();  // newest first
+      for (var k = 0; k < keys.length; k++) {
+        var rows = groups.get(keys[k]).slice().sort(function (a, b) {
+          return postedTs(b) - postedTs(a);
+        });
+        queueItems(keys[k], rows);
+      }
+    }
+
+    appendBatch();
+  }
+
+  function queueItems(header, items) {
+    if (header) renderQueue.push({ header: header });
+    // Every item is openable, not just ones with media -- otherwise text posts
+    // and their comment threads have no click target at all.
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      it.__gi = postGroups.length;
+      postGroups.push(it);
+      renderQueue.push({ item: it });
+    }
+  }
+
+  function appendBatch() {
+    var added = 0;
+    while (queueAt < renderQueue.length && added < BATCH) {
+      var entry = renderQueue[queueAt++];
+      if (entry.header) {
+        var h = document.createElement('div');
+        h.className = 'group-title';
+        h.textContent = entry.header;
+        main.appendChild(h);
+        currentGrid = document.createElement('div');
+        currentGrid.className = 'grid';
+        main.appendChild(currentGrid);
+      } else {
+        if (!currentGrid) {
+          currentGrid = document.createElement('div');
+          currentGrid.className = 'grid';
+          main.appendChild(currentGrid);
+        }
+        currentGrid.appendChild(cardFor(entry.item));
+        added++;
+      }
+    }
+  }
+
+  var io = new IntersectionObserver(function (entries) {
+    if (entries[0].isIntersecting) appendBatch();
+  }, { rootMargin: '900px' });
+  io.observe(sentinel);
+
+  // ---------- comments (loaded on demand) ----------
+
+  var commentsState = 'idle';   // idle | loading | ready | missing
+  var commentsWaiting = null;
+
+  function ensureComments(cb) {
+    if (commentsState === 'ready' || commentsState === 'missing') { cb(); return; }
+    commentsWaiting = cb;
+    if (commentsState === 'loading') return;
+    commentsState = 'loading';
+    // A file:// page cannot fetch() a local file, but it can always load a
+    // script tag -- which is why the index ships as .js rather than .json.
+    var s = document.createElement('script');
+    s.src = 'library-comments.js';
+    s.onload = function () {
+      commentsState = window.LIBRARY_COMMENTS ? 'ready' : 'missing';
+      if (commentsWaiting) { commentsWaiting(); commentsWaiting = null; }
+    };
+    s.onerror = function () {
+      commentsState = 'missing';
+      if (commentsWaiting) { commentsWaiting(); commentsWaiting = null; }
+    };
+    document.head.appendChild(s);
+  }
+
+  function commentHtml(c, depth) {
+    var kids = c.replies && c.replies.length
+      ? '<div class="cmt-children">' +
+          c.replies.map(function (r) { return commentHtml(r, depth + 1); }).join('') +
+        '</div>'
+      : '';
+    var toggle = kids ? '<span class="cmt-toggle">−</span>' : '';
+    return '<div class="cmt">' +
+      '<div class="cmt-head">' + toggle +
+        '<span class="cmt-author">u/' + escapeHtml(c.author || 'unknown') + '</span>' +
+        ' · ' + (c.score || 0) + ' pts</div>' +
+      '<div class="cmt-body">' + escapeHtml(c.body) + '</div>' + kids +
+    '</div>';
+  }
+
+  function renderComments(item) {
+    var box = $('lb-comments');
+    if (item.type === 'comment' || !item.ncomments) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="comments-head">Comments</div>' +
+      '<div class="muted-note">Loading…</div>';
+    ensureComments(function () {
+      var tree = (window.LIBRARY_COMMENTS || {})[item.id];
+      if (!tree || !tree.length) {
+        box.innerHTML = '<div class="comments-head">Comments</div>' +
+          '<div class="muted-note">No comment thread archived for this post. ' +
+          'Run “Backfill comments” in the app.</div>';
+        return;
+      }
+      box.innerHTML = '<div class="comments-head">' + tree.length +
+        ' comment threads</div>' +
+        tree.map(function (c) { return commentHtml(c, 0); }).join('');
+    });
+  }
+
+  $('lb-comments').addEventListener('click', function (e) {
+    var t = e.target.closest('.cmt-toggle');
+    if (!t) return;
+    var kids = t.closest('.cmt').querySelector('.cmt-children');
+    if (!kids) return;
+    var hidden = kids.style.display === 'none';
+    kids.style.display = hidden ? '' : 'none';
+    t.textContent = hidden ? '−' : '+';
+  });
+
+  // ---------- lightbox ----------
+
+  var lightbox = $('lightbox'), lbContent = $('lb-content');
+  var curPost = -1, curMedia = 0;
+
+  function openLightbox(gi, mi) {
+    if (gi < 0 || gi >= postGroups.length) return;
+    curPost = gi;
+    var count = (postGroups[gi].media || []).length;
+    curMedia = count ? Math.max(0, Math.min(mi || 0, count - 1)) : 0;
+    drawLightbox();
+    lightbox.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLightbox() {
+    lightbox.classList.add('hidden');
+    lbContent.innerHTML = '';   // stops any playing video
+    document.body.style.overflow = '';
+    curPost = -1;
+  }
+
+  function drawLightbox() {
+    var item = postGroups[curPost];
+    var media = item.media || [];
+    var m = media[curMedia];
+
+    lbContent.innerHTML = '';
+    if (!m) {
+      // Text-only post, saved comment, or media that no longer exists. Show the
+      // writing itself rather than an empty black frame.
+      var text = item.selftext || item.body || '';
+      var box = document.createElement('div');
+      box.className = 'lb-textview';
+      box.innerHTML =
+        '<div class="lb-textview-title">' + escapeHtml(item.title || item.link_title || '') + '</div>' +
+        (text ? '<div class="lb-textview-body">' + escapeHtml(text) + '</div>'
+              : '<div class="muted-note">' +
+                escapeHtml(item.media_error ? 'The media for this post ' + item.media_error
+                                            : 'This post has no text or media.') +
+                '</div>');
+      lbContent.appendChild(box);
+    } else {
+      var el;
+      if (m.v) {
+        el = document.createElement('video');
+        el.controls = true; el.autoplay = true; el.loop = true;
+        if (m.p) el.poster = mediaUrl(item.dir, m.p);
+      } else {
+        el = document.createElement('img');
+      }
+      el.className = 'lb-media';
+      el.src = mediaUrl(item.dir, m.f);
+      lbContent.appendChild(el);
+    }
+
+    $('lb-prev').disabled = media.length < 2;
+    $('lb-next').disabled = media.length < 2;
+
+    $('lb-counter').textContent =
+      'Post ' + (curPost + 1) + ' / ' + postGroups.length +
+      (media.length > 1 ? '  ·  media ' + (curMedia + 1) + ' / ' + media.length : '') +
+      (m && m.v && item.has_audio === false ? '  ·  no audio track' : '');
+
+    $('lb-title').textContent =
+      item.title || item.link_title || (item.type === 'comment' ? 'Saved comment' : '(untitled)');
+
+    var who = item.author || item.username || 'unknown';
+    $('lb-meta').innerHTML =
+      '<span class="author-link" data-author="' + escapeHtml(who) + '">u/' + escapeHtml(who) + '</span>' +
+      ' · r/' + escapeHtml(item.subreddit) +
+      ' · ' + (item.score || 0) + ' pts<br>' +
+      'posted ' + fmtDate(postedTs(item)) +
+      (item.username && item.username !== item.author
+        ? '<br>from u/' + escapeHtml(item.username) + '’s profile' : '');
+
+    // When there is no media the text already fills the main area, so don't
+    // repeat it in the side panel.
+    var panelText = m ? (item.selftext || item.body || '') : '';
+    $('lb-desc').innerHTML = panelText ? escapeHtml(panelText) : '';
+    $('lb-desc').style.display = panelText ? '' : 'none';
+
+    $('lb-links').innerHTML = item.permalink
+      ? '<a href="' + escapeHtml(item.permalink) + '" target="_blank" rel="noopener">Open on Reddit ↗</a>'
+      : '';
+
+    renderActions(item);
+    renderComments(item);
+  }
+
+  // ---- per-post actions ----
+
+  function renderActions(item) {
+    $('act-fav').classList.toggle('on', favorites.has(item.id));
+    $('act-fav').textContent = favorites.has(item.id) ? '★ Favourited' : '☆ Favourite';
+    renderTagList(item);
+  }
+
+  function renderTagList(item) {
+    var list = tags[item.id] || [];
+    $('tag-list').innerHTML = list.map(function (t) {
+      return '<span class="tag" data-tag="' + escapeHtml(t) + '">' +
+             escapeHtml(t) + ' <span class="x">✕</span></span>';
+    }).join('');
+  }
+
+  $('act-fav').addEventListener('click', function () {
+    var item = postGroups[curPost];
+    if (!item) return;
+    toggleFavorite(item.id);
+    renderActions(item);
+    syncCardStar(item.id);
+  });
+
+  // Update just the affected card. Calling render() here rebuilt all 2,000+
+  // cards and dumped you back at the top of the page on closing the lightbox.
+  function syncCardStar(id) {
+    var on = favorites.has(id);
+    var nodes = main.querySelectorAll('[data-fav="' + CSS.escape(id) + '"]');
+    for (var i = 0; i < nodes.length; i++) nodes[i].classList.toggle('on', on);
+  }
+
+  $('tag-input').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var item = postGroups[curPost];
+    var value = this.value.trim().toLowerCase();
+    if (!item || !value) return;
+    var list = tags[item.id] || (tags[item.id] = []);
+    if (list.indexOf(value) === -1) list.push(value);
+    this.value = '';
+    saveUserData();
+    renderTagList(item);
+    renderSidebar();
+  });
+
+  $('tag-list').addEventListener('click', function (e) {
+    var chip = e.target.closest('[data-tag]');
+    var item = postGroups[curPost];
+    if (!chip || !item) return;
+    tags[item.id] = (tags[item.id] || []).filter(function (t) {
+      return t !== chip.dataset.tag;
+    });
+    if (!tags[item.id].length) delete tags[item.id];
+    saveUserData();
+    renderTagList(item);
+    renderSidebar();
+  });
+
+  function nextMedia() {
+    var g = postGroups[curPost];
+    if (!g || (g.media || []).length < 2) return;
+    curMedia = (curMedia + 1) % g.media.length;
+    drawLightbox();
+  }
+  function prevMedia() {
+    var g = postGroups[curPost];
+    if (!g || (g.media || []).length < 2) return;
+    curMedia = (curMedia - 1 + g.media.length) % g.media.length;
+    drawLightbox();
+  }
+  function nextPost() { openLightbox((curPost + 1) % postGroups.length, 0); }
+  function prevPost() { openLightbox((curPost - 1 + postGroups.length) % postGroups.length, 0); }
+
+  $('lb-close').addEventListener('click', closeLightbox);
+  $('lb-next').addEventListener('click', nextMedia);
+  $('lb-prev').addEventListener('click', prevMedia);
+  $('lb-down').addEventListener('click', nextPost);
+  $('lb-up').addEventListener('click', prevPost);
+  lightbox.addEventListener('click', function (e) {
+    if (e.target === lightbox || e.target.classList.contains('lb-main')) closeLightbox();
+  });
+  $('lb-meta').addEventListener('click', function (e) {
+    var a = e.target.closest('.author-link');
+    if (!a) return;
+    authorFilter = a.dataset.author;
+    closeLightbox();
+    render();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (lightbox.classList.contains('hidden')) {
+      if (e.key === '/' && document.activeElement !== search) {
+        e.preventDefault(); search.focus();
+      }
+      return;
+    }
+    if (e.key === 'ArrowRight') { e.preventDefault(); nextMedia(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); prevMedia(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); nextPost(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); prevPost(); }
+    else if (e.key === 'Escape') closeLightbox();
+  });
+
+  main.addEventListener('click', function (e) {
+    var star = e.target.closest('[data-fav]');
+    if (star) {
+      e.stopPropagation();
+      toggleFavorite(star.dataset.fav);
+      star.classList.toggle('on');
+      return;
+    }
+    var a = e.target.closest('.author-link');
+    if (a && a.dataset.author) {
+      authorFilter = authorFilter === a.dataset.author ? null : a.dataset.author;
+      render();
+      return;
+    }
+    // Let real links through instead of hijacking them into the lightbox.
+    if (e.target.closest('a')) return;
+    var t = e.target.closest('[data-post-group]');
+    if (t) openLightbox(parseInt(t.dataset.postGroup, 10), 0);
+  });
+
+  // ---------- controls ----------
+
+  var searchTimer;
+  search.addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(render, 140);
+  });
+  groupSel.addEventListener('change', function () { randomOrder = false; render(); });
+  shuffleBtn.addEventListener('click', function () {
+    randomOrder = !randomOrder;
+    if (randomOrder) shuffled = shuffleArr(ITEMS);
+    render();
+  });
+  blurBtn.addEventListener('click', function () { blurNsfw = !blurNsfw; render(); });
+  $('fav-btn').addEventListener('click', function () { favOnly = !favOnly; render(); });
+
+  typeChips.addEventListener('click', function (e) {
+    var chip = e.target.closest('.chip');
+    if (!chip) return;
+    var type = chip.dataset.type;
+    if (type === 'all') {
+      var allOn = activeTypes.size === 3;
+      activeTypes = allOn ? new Set() : new Set(['post', 'video', 'comment']);
+    } else if (activeTypes.has(type)) {
+      activeTypes.delete(type);
+    } else {
+      activeTypes.add(type);
+    }
+    Array.prototype.forEach.call(typeChips.children, function (c) {
+      c.classList.toggle('active', c.dataset.type === 'all'
+        ? activeTypes.size === 3
+        : activeTypes.has(c.dataset.type));
+    });
+    render();
+  });
+
+  if (!ITEMS.length) {
+    main.innerHTML = '<div class="empty"><b>No archive data found</b>' +
+      'library-data.js is missing or empty. Open the app and click ' +
+      '“Rebuild index”, then reopen this page.</div>';
+    $('brand-sub').textContent = 'empty';
+  } else {
+    // Stars and tags have to be known before the first paint, or every card
+    // renders unstarred and then flickers.
+    loadUserData();
+    render();
+  }
+})();
+</script>
+</body>
+</html>

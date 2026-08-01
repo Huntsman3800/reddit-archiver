@@ -1,0 +1,78 @@
+name: Build Windows executable
+
+# Builds RedditArchiver.exe and attaches it to a GitHub Release.
+#
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#
+# The tag push is what publishes a release. The manual trigger below just
+# produces a downloadable artifact, handy for testing a build without
+# releasing it.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build
+        run: pyinstaller RedditArchiver.spec
+
+      - name: Smoke-test the executable
+        # The app is windowed, so it cannot report to a console. Launch it,
+        # give it a moment, and fail the build if it died on startup.
+        run: |
+          $p = Start-Process -FilePath dist\RedditArchiver.exe -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) {
+            Write-Error "RedditArchiver.exe exited early (code $($p.ExitCode))"
+            exit 1
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "Executable started and stayed running."
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RedditArchiver-windows
+          path: dist/RedditArchiver.exe
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/RedditArchiver.exe
+          generate_release_notes: true
+          body: |
+            ### Install
+
+            Download `RedditArchiver.exe` below and run it. No Python needed.
+
+            **ffmpeg is required for video thumbnails and sound.** Grab a build
+            from <https://www.gyan.dev/ffmpeg/builds/>, unzip it, and either add
+            its `bin` folder to `PATH` or point Settings at `ffmpeg.exe`.
+
+            > Windows SmartScreen may warn on first run because the executable
+            > is unsigned. Choose *More info -> Run anyway*, or build it
+            > yourself from source.

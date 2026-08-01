@@ -1,0 +1,30 @@
+# Contains your reddit_session cookie in plaintext -- never commit this.
+settings.json
+
+# The archive itself: your downloaded content, and Trash inside it.
+Archive/
+
+# Machine-local Claude Code config. Contains absolute paths from whichever
+# computer it was generated on, so it is both private and useless to others.
+.claude/
+
+# Packaging output. Releases carry the built .exe, the repo does not.
+dist/
+build/
+*.spec.bak
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Interrupted downloads and atomic-write leftovers
+*.part
+*.tmp
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
