@@ -844,16 +844,23 @@ class RedditArchiverApp(ctk.CTk):
     def open_viewer(self):
         archive_dir = self.settings["archive_dir"]
         viewer = os.path.join(archive_dir, "Archive.html")
-        source = os.path.join(config.APP_DIR, "Archive.html")
+        # resource_dir(), NOT APP_DIR: in a packaged build APP_DIR is the folder
+        # holding the .exe, while bundled files are unpacked to _MEIPASS. Using
+        # APP_DIR here meant the source was never found, the copy was skipped,
+        # and the viewer simply never appeared.
+        source = os.path.join(config.resource_dir(), "Archive.html")
         # The viewer has to sit beside library-data.js for relative paths to
         # resolve, so keep a current copy inside the archive.
         try:
             if os.path.exists(source):
                 shutil.copyfile(source, viewer)
+            elif not os.path.exists(viewer):
+                self.log(f"Could not find the viewer template at {source}")
         except OSError as exc:
             self.log(f"Could not update viewer: {exc}")
         if not os.path.exists(viewer):
-            self.log("Archive.html is missing.")
+            self.log("Archive.html is missing -- this build is incomplete. "
+                     "Please report it.")
             return
         if not os.path.exists(os.path.join(archive_dir, "library-data.js")):
             self.log("No index yet -- rebuilding first.")
