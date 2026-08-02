@@ -11,6 +11,7 @@ Two things worth knowing before editing this file:
    -- not that the URL was wrong. fetch_json() reports it that way.
 """
 
+import concurrent.futures
 import os
 import re
 import time
@@ -76,15 +77,39 @@ class Throttle:
     """
 
     MAX_DELAY = 20.0
+    # A penalty that outlives the burst that caused it is worse than no penalty
+    # at all: one transient blip used to leave the client crawling at 20s per
+    # request for the next ~70 requests. After this long without a 429, treat
+    # the incident as over and go straight back to the configured pace.
+    FORGET_AFTER = 90.0
 
     def __init__(self, base_delay=1.5):
         self.base = max(0.2, base_delay)
         self.current = self.base
         self.clean_streak = 0
+        self.last_penalty = 0.0
+        self.last_request = 0.0
+
+    def mark_request(self):
+        """Record when a request actually hit the network."""
+        self.last_request = time.monotonic()
+
+    def wait_needed(self):
+        """Seconds still owed before the next request.
+
+        Pacing is measured from the previous request, not slept blindly after
+        each item. Work done in between -- downloading media, writing files --
+        already counts toward the interval, so a post that took 2s of real work
+        owes nothing more.
+        """
+        if not self.last_request:
+            return 0.0
+        return max(0.0, self.current - (time.monotonic() - self.last_request))
 
     def penalize(self):
         self.current = min(self.MAX_DELAY, max(self.current * 2, self.base * 2))
         self.clean_streak = 0
+        self.last_penalty = time.monotonic()
         return self.current
 
     def reward(self, headers=None):
@@ -103,9 +128,21 @@ class Throttle:
                 self.current = max(self.base, min(self.MAX_DELAY, reset / remaining))
                 return
 
+        if self.current <= self.base:
+            return
+
+        # Long enough since the last 429 that the penalty has served its
+        # purpose -- stop punishing an otherwise healthy run.
+        if time.monotonic() - self.last_penalty > self.FORGET_AFTER:
+            self.current = self.base
+            self.clean_streak = 0
+            return
+
+        # Otherwise halve the *excess* over the base rather than scaling the
+        # whole delay, which converges in a handful of requests instead of ~70.
         self.clean_streak += 1
-        if self.clean_streak >= 8 and self.current > self.base:
-            self.current = max(self.base, self.current * 0.75)
+        if self.clean_streak >= 4:
+            self.current = max(self.base, self.base + (self.current - self.base) * 0.5)
             self.clean_streak = 0
 
 
@@ -152,8 +189,16 @@ class RedditClient:
             time.sleep(min(0.2, remaining))
 
     def pace(self):
-        """Wait the current inter-request interval. False if the user stopped."""
-        return self.sleep(self.throttle.current)
+        """Wait out whatever is still owed since the last request.
+
+        Time spent downloading media and writing files counts toward the
+        interval, so this usually sleeps for little or nothing at the default
+        pace. Returns False if the user stopped.
+        """
+        owed = self.throttle.wait_needed()
+        if owed <= 0:
+            return not self.should_stop()
+        return self.sleep(owed)
 
     def _set_cookie(self, value):
         self.session.cookies.set("reddit_session", value, domain=".reddit.com")
@@ -308,6 +353,11 @@ class RedditClient:
         attempt = 0
         throttled = 0
         while not self.should_stop():
+            # Honour whatever interval is still owed from the previous call,
+            # so pacing is enforced per API request rather than per item.
+            if not self.pace():
+                return None
+            self.throttle.mark_request()
             try:
                 res = self.session.get(url, timeout=TIMEOUT)
             except requests.RequestException as exc:
@@ -446,6 +496,32 @@ class RedditClient:
             self.log(f"  download failed: {exc}")
             return False
 
+    def _download_parallel(self, jobs, out_dir, workers=6):
+        """Fetch several CDN files at once. Returns filenames in gallery order.
+
+        Order matters -- the viewer shows a gallery in the order Reddit lists
+        it -- so results are re-sorted by index rather than by completion.
+        """
+        if len(jobs) == 1:
+            idx, url, name = jobs[0]
+            return [name] if self._download_file(url, os.path.join(out_dir, name)) else []
+
+        done = {}
+
+        def run(job):
+            idx, url, name = job
+            if self.should_stop():
+                return
+            if self._download_file(url, os.path.join(out_dir, name)):
+                done[idx] = name
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(workers, len(jobs))
+        ) as pool:
+            list(pool.map(run, jobs))
+
+        return [done[i] for i in sorted(done)]
+
     def download_media(self, item, out_dir, post_id):
         """Fetch a post's media into out_dir.
 
@@ -473,9 +549,8 @@ class RedditClient:
             if not order:
                 order = list(metadata.keys())
 
+            jobs = []
             for idx, media_id in enumerate(order, start=1):
-                if self.should_stop():
-                    break
                 info = metadata.get(media_id) or {}
                 if info.get("status") != "valid":
                     continue
@@ -485,9 +560,13 @@ class RedditClient:
                 if not img_url:
                     continue
                 ext = _clean_ext(img_url, default="jpg")
-                name = f"{post_id}_{idx}.{ext}"
-                if self._download_file(img_url, os.path.join(out_dir, name)):
-                    media_files.append(name)
+                jobs.append((idx, img_url, f"{post_id}_{idx}.{ext}"))
+
+            # Gallery images come from Reddit's CDN, which is not the rate-limited
+            # API, so fetching a few at once is both safe and much faster than
+            # walking a 20-image gallery one file at a time.
+            if jobs:
+                media_files = self._download_parallel(jobs, out_dir)
             if media_files:
                 return media_files, False
 

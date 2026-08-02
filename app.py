@@ -418,6 +418,18 @@ class RedditArchiverApp(ctk.CTk):
             self.set_status("Failed -- see log")
         finally:
             try:
+                # Poster frames before indexing, so freshly downloaded videos
+                # get a thumbnail in the same pass. Without this they show as
+                # black cards until someone happens to click "Generate
+                # thumbnails" by hand. Only missing ones are processed.
+                thumbnails.generate(
+                    self.settings["archive_dir"], log=self.log,
+                    should_stop=lambda: False,
+                    configured=self.settings.get("ffmpeg_path", ""),
+                )
+            except Exception as exc:
+                self.log(f"Thumbnail generation failed: {exc!r}")
+            try:
                 library.build_index(self.settings["archive_dir"], log=self.log)
             except Exception as exc:
                 self.log(f"Index rebuild failed: {exc!r}")
@@ -454,7 +466,6 @@ class RedditArchiverApp(ctk.CTk):
             after = page["data"].get("after")
             if not after:
                 break
-            self.client.pace()
 
         total = len(items)
         if not total:
@@ -528,7 +539,6 @@ class RedditArchiverApp(ctk.CTk):
                 has_audio=has_audio, top_comments=comments,
                 media_error=media_error,
             ))
-            self.client.pace()
 
         self.log(
             f"Done. {new} newly archived, {upgraded} upgraded, "
@@ -615,7 +625,6 @@ class RedditArchiverApp(ctk.CTk):
             after = page["data"].get("after")
             if not after:
                 break
-            self.client.pace()
 
         total = len(items)
         if not total:
@@ -659,7 +668,6 @@ class RedditArchiverApp(ctk.CTk):
             if self.client.media_error:
                 unavailable += 1
             new += 1
-            self.client.pace()
 
         self.log(f"Snapshot done. {new} archived, {skipped} already present.")
         if unavailable:
@@ -736,7 +744,6 @@ class RedditArchiverApp(ctk.CTk):
                 )
                 if comments:
                     fetched += 1
-                self.client.pace()
 
             if is_raw:
                 media = sorted(

@@ -72,7 +72,7 @@ DEFAULTS = {
     "last_sync": 0,
 }
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 
 def load():
