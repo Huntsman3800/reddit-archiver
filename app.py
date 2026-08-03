@@ -24,6 +24,7 @@ import customtkinter as ctk
 import config
 import health
 import library
+import dedupe
 import snapshots
 import thumbnails
 import storage
@@ -202,6 +203,9 @@ class RedditArchiverApp(ctk.CTk):
         self.btn_health = self._button(
             sidebar, "Check archive health", self.start_health_check
         )
+        self.btn_dedupe = self._button(
+            sidebar, "Reclaim duplicate space", self.start_dedupe
+        )
         self.btn_manage = self._button(
             sidebar, "Manage archive", self.open_manage
         )
@@ -303,7 +307,8 @@ class RedditArchiverApp(ctk.CTk):
         for btn in (
             self.btn_sync, self.btn_backfill,
             self.btn_snapshot, self.btn_refresh,
-            self.btn_index, self.btn_thumbs, self.btn_health, self.btn_manage,
+            self.btn_index, self.btn_thumbs, self.btn_health,
+            self.btn_dedupe, self.btn_manage,
             self.btn_settings,
         ):
             btn.configure(state=state)
@@ -473,7 +478,9 @@ class RedditArchiverApp(ctk.CTk):
             return
         self.log(f"Found {total} saved items. Downloading what's missing...")
 
-        new = skipped = upgraded = comments_saved = unavailable = 0
+        known = dedupe.build_post_index(paths["root"])
+        new = skipped = upgraded = comments_saved = unavailable = reused = 0
+        saved_bytes = 0
         for index, child in enumerate(items, start=1):
             if not self.is_running:
                 self.log("Stopped by user.")
@@ -520,11 +527,21 @@ class RedditArchiverApp(ctk.CTk):
                 self.log(f"Upgrading metadata: {title}")
                 upgraded += 1
             else:
-                self.log(f"Archiving: {title}")
-                media, has_audio = self.client.download_media(data, post_dir, post_id)
-                media_error = self.client.media_error
-                if media_error:
-                    unavailable += 1
+                media, freed = dedupe.reuse_existing(known.get(post_id), post_dir)
+                media_error = None
+                if media:
+                    has_audio = any(m.endswith("_audio.mp4") for m in media)
+                    reused += 1
+                    saved_bytes += freed
+                    self.log(f"Reusing: {title}")
+                else:
+                    self.log(f"Archiving: {title}")
+                    media, has_audio = self.client.download_media(
+                        data, post_dir, post_id
+                    )
+                    media_error = self.client.media_error
+                    if media_error:
+                        unavailable += 1
                 new += 1
 
             comments = None
@@ -544,6 +561,9 @@ class RedditArchiverApp(ctk.CTk):
             f"Done. {new} newly archived, {upgraded} upgraded, "
             f"{comments_saved} comments saved, {skipped} already current."
         )
+        if reused:
+            self.log(f"{reused} post(s) reused media already in the archive "
+                     f"({storage.human_size(saved_bytes)} not re-downloaded).")
         if unavailable:
             self.log(
                 f"{unavailable} post(s) had media that no longer exists at the "
@@ -632,7 +652,14 @@ class RedditArchiverApp(ctk.CTk):
             return
         self.log(f"Found {total} posts. Archiving...")
 
-        new = skipped = unavailable = 0
+        # Snapshots live in dated folders, so a refresh would otherwise
+        # re-download the creator's entire history every time. Anything already
+        # held elsewhere in the archive is hard-linked in instead: no request,
+        # no wait, no second copy on disk.
+        known = dedupe.build_post_index(archive_dir)
+
+        new = skipped = unavailable = reused = 0
+        saved_bytes = 0
         for index, child in enumerate(items, start=1):
             if not self.is_running:
                 self.log("Stopped by user.")
@@ -649,9 +676,21 @@ class RedditArchiverApp(ctk.CTk):
                 continue
 
             self.set_status(f"[{index}/{total}] {title}")
-            self.log(f"Archiving: {title}")
-            os.makedirs(post_dir, exist_ok=True)
-            media, has_audio = self.client.download_media(data, post_dir, post_id)
+
+            media, freed = dedupe.reuse_existing(known.get(post_id), post_dir)
+            if media:
+                has_audio = any(m.endswith("_audio.mp4") for m in media)
+                reused += 1
+                saved_bytes += freed
+                self.log(f"Reusing: {title}")
+            else:
+                self.log(f"Archiving: {title}")
+                os.makedirs(post_dir, exist_ok=True)
+                media, has_audio = self.client.download_media(
+                    data, post_dir, post_id
+                )
+                if media:
+                    known[post_id] = post_dir
 
             comments = None
             if self.settings.get("fetch_comments"):
@@ -669,7 +708,11 @@ class RedditArchiverApp(ctk.CTk):
                 unavailable += 1
             new += 1
 
-        self.log(f"Snapshot done. {new} archived, {skipped} already present.")
+        parts = [f"{new} archived", f"{skipped} already present"]
+        if reused:
+            parts.append(f"{reused} reused from an existing copy "
+                         f"({storage.human_size(saved_bytes)} not re-downloaded)")
+        self.log("Snapshot done. " + ", ".join(parts) + ".")
         if unavailable:
             self.log(f"{unavailable} post(s) had media deleted at the source.")
 
@@ -826,6 +869,42 @@ class RedditArchiverApp(ctk.CTk):
                 should_stop=self._should_stop,
             )
             library.build_index(self.settings["archive_dir"], log=self.log)
+
+    def start_dedupe(self):
+        self._start_local_job(
+            "Looking for duplicate files...", "Duplicate scan complete",
+            self._dedupe,
+        )
+
+    def _dedupe(self):
+        """Collapse identical files onto shared storage, with confirmation."""
+        archive_dir = self.settings["archive_dir"]
+        groups, reclaimable, total = dedupe.scan(
+            archive_dir, log=self.log, should_stop=self._should_stop
+        )
+        copies = sum(len(extra) for _k, extra, _s in groups)
+        if not reclaimable:
+            self.log("No duplicate media found -- nothing to reclaim.")
+            return
+        self.log(
+            f"{copies} duplicate file(s) using "
+            f"{storage.human_size(reclaimable)} of "
+            f"{storage.human_size(total)}."
+        )
+        if not messagebox.askyesno(
+            "Reclaim duplicate space",
+            f"Found {copies} files whose contents are already stored "
+            f"elsewhere in the archive, wasting "
+            f"{storage.human_size(reclaimable)}.\n\n"
+            f"They can share one copy on disk instead. Every file stays exactly "
+            f"where it is and opens normally -- only the duplicated bytes go "
+            f"away.\n\nReclaim the space now?",
+            parent=self,
+        ):
+            self.log("Left the archive unchanged.")
+            return
+        dedupe.reclaim(archive_dir, groups, log=self.log,
+                       should_stop=self._should_stop)
 
     def _start_local_job(self, busy_text, done_text, target):
         """Run a job that needs no network, so it works without signing in."""
