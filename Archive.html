@@ -235,11 +235,53 @@
   }
   .cmt-toggle:hover { color:var(--fg); border-color:#444; }
 
+  /* Hidden on desktop, where the sidebar is always visible. */
+  #menu-btn { display:none; }
+  #backdrop {
+    position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:19;
+    opacity:0; pointer-events:none; transition:opacity .18s;
+  }
+  #backdrop.open { opacity:1; pointer-events:auto; }
+
   @media (max-width:900px) {
-    #sidebar { display:none; }
+    /* The sidebar becomes a drawer rather than disappearing: creators, tags
+       and source filters are unreachable on a phone otherwise. */
+    #sidebar {
+      display:block; transform:translateX(-100%);
+      transition:transform .2s ease; width:min(84vw, 300px);
+      box-shadow:2px 0 18px rgba(0,0,0,.5);
+    }
+    #sidebar.open { transform:translateX(0); }
+    #menu-btn {
+      display:block; flex:0 0 auto; width:40px; height:38px;
+      background:var(--card); color:var(--fg); border:1px solid var(--border);
+      border-radius:8px; font-size:17px; cursor:pointer; line-height:1;
+      font-family:inherit;
+    }
+    #menu-btn:active { background:var(--card-hi); }
     #content { margin-left:0; }
-    .lb-panel { display:none; }
-    .lb-media { max-width:100%; }
+    main { padding:14px 12px 50px; }
+    header { padding:12px 14px; }
+    .grid { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+    .count-note { margin-left:0; width:100%; }
+
+    /* Stack the info panel under the media rather than hiding it -- on a phone
+       the title, description and comments are most of the point. */
+    .lightbox { flex-direction:column; }
+    .lb-main { flex:0 0 58vh; min-height:0; }
+    .lb-media { max-width:100%; max-height:58vh; }
+    .lb-textview { max-width:calc(100% - 24px); max-height:54vh; padding:20px; }
+    .lb-panel {
+      width:100%; flex:1 1 auto; border-left:none;
+      border-top:1px solid var(--border); padding:16px 16px 40px;
+      -webkit-overflow-scrolling:touch;
+    }
+    /* Touch targets big enough to hit, and out of the way of the media. */
+    .lb-nav.side { width:44px; height:44px; font-size:24px; }
+    .lb-prev { left:6px; } .lb-next { right:6px; }
+    .lb-nav.vert { width:38px; height:38px; }
+    .lb-up { top:8px; } .lb-down { bottom:8px; }
+    .lb-counter { font-size:10.5px; bottom:8px; left:8px; }
   }
 </style>
 </head>
@@ -256,10 +298,12 @@
   <div id="creator-list"></div>
   <div id="tag-sidebar"></div>
 </aside>
+<div id="backdrop"></div>
 
 <div id="content">
   <header>
     <div class="row1">
+      <button id="menu-btn" aria-label="Filters">☰</button>
       <input type="text" id="search" placeholder="Search titles, text, subreddits, authors…" />
       <select id="group-by">
         <option value="posted">Group by month posted</option>
@@ -328,6 +372,7 @@
   var main = $('main'), search = $('search'), groupSel = $('group-by');
   var typeChips = $('type-chips'), filterWrap = $('filter-chip-wrap');
   var creatorList = $('creator-list'), sourceList = $('source-list');
+  var sidebar = $('sidebar');
   var countNote = $('count-note'), sentinel = $('sentinel');
   var shuffleBtn = $('shuffle-btn'), blurBtn = $('blur-btn');
 
@@ -1028,6 +1073,29 @@
   });
 
   // ---------- controls ----------
+
+  // ---- mobile filter drawer ----
+  // Below 900px the sidebar slides in over the content. Any selection closes
+  // it, so picking a creator doesn't leave the drawer covering the results.
+  var backdrop = $('backdrop');
+
+  function setDrawer(open) {
+    sidebar.classList.toggle('open', open);
+    backdrop.classList.toggle('open', open);
+  }
+
+  $('menu-btn').addEventListener('click', function () {
+    setDrawer(!sidebar.classList.contains('open'));
+  });
+  backdrop.addEventListener('click', function () { setDrawer(false); });
+  sidebar.addEventListener('click', function (e) {
+    if (e.target.closest('[data-creator],[data-source],[data-tag-filter]')) {
+      setDrawer(false);
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') setDrawer(false);
+  });
 
   var searchTimer;
   search.addEventListener('input', function () {

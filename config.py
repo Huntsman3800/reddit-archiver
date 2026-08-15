@@ -64,6 +64,11 @@ DEFAULTS = {
     "browser": "auto",         # 'auto' or a browser_cookie3 loader name
     "fetch_comments": True,    # capture comment threads on saved posts
     "comment_limit": 50,       # top-level comments to keep per post
+    # Comments on an old post rarely change, and Reddit locks threads
+    # entirely after six months. Re-fetching them on every refresh is the
+    # single biggest cost, so posts older than this reuse what we already
+    # archived. 0 disables the shortcut and always re-fetches.
+    "comment_refresh_days": 30,
     # Starting gap between API calls. This is a floor, not a fixed pace: the
     # client slows down on its own when Reddit pushes back. Values below ~1.0
     # reliably trip the rate limiter once comment fetching is on.
@@ -72,7 +77,7 @@ DEFAULTS = {
     "last_sync": 0,
 }
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 
 def load():

@@ -33,14 +33,29 @@ def write_json(path, data, indent=2):
 
 
 def dir_size(path):
-    """Total bytes under a directory. Missing files are skipped, not fatal."""
+    """Bytes actually occupied under a directory.
+
+    Counts each inode once. Snapshots hard-link media that is already archived,
+    so the same bytes appear at many paths -- summing every file's size instead
+    reports a total that climbs by gigabytes on every refresh while the disk
+    does not move at all.
+
+    Missing files are skipped rather than fatal.
+    """
     total = 0
+    seen = set()
     for dirpath, _, filenames in os.walk(path):
         for name in filenames:
             try:
-                total += os.path.getsize(os.path.join(dirpath, name))
+                st = os.stat(os.path.join(dirpath, name))
             except OSError:
-                pass
+                continue
+            if st.st_nlink > 1 and st.st_ino:
+                # Shared storage: charge it to whichever path we meet first.
+                if st.st_ino in seen:
+                    continue
+                seen.add(st.st_ino)
+            total += st.st_size
     return total
 
 

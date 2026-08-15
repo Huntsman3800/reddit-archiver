@@ -25,6 +25,7 @@ import config
 import health
 import library
 import dedupe
+import share_server
 import snapshots
 import thumbnails
 import storage
@@ -101,6 +102,7 @@ class RedditArchiverApp(ctk.CTk):
         self.is_running = False
         self.client = None
         self.username = self.settings.get("username", "")
+        self.share = None
 
         self._set_icon()
         self._build_ui()
@@ -210,6 +212,9 @@ class RedditArchiverApp(ctk.CTk):
             sidebar, "Manage archive", self.open_manage
         )
         self.btn_viewer = self._button(sidebar, "Open viewer", self.open_viewer)
+        self.btn_share = self._button(
+            sidebar, "Share on this network", self.toggle_share
+        )
         self.btn_folder = self._button(sidebar, "Open archive folder", self.open_folder)
 
         # --- Main panel ---
@@ -444,6 +449,34 @@ class RedditArchiverApp(ctk.CTk):
             self.set_progress(0)
             self.refresh_stats()
 
+    def _comments_for(self, data, post_id, source_dir):
+        """Comment thread for a post, reusing the archived copy when it is safe.
+
+        Reddit locks threads after six months, and older posts rarely gain
+        comments, so re-fetching them on every refresh spends the one API call
+        per post that dominates a run. Returns (comments, reused).
+        """
+        if not self.settings.get("fetch_comments"):
+            return None, False
+
+        threshold = self.settings.get("comment_refresh_days", 30) or 0
+        if threshold and source_dir:
+            created = data.get("created_utc") or 0
+            age_days = (time.time() - created) / 86400 if created else 0
+            if age_days > threshold:
+                previous = read_json(os.path.join(source_dir, "metadata.json"))
+                if previous is not None:
+                    existing = previous.get("top_comments")
+                    # An empty list is a real answer (the post had none), so
+                    # test for presence rather than truthiness.
+                    if existing is not None:
+                        return existing, True
+
+        return self.client.fetch_comments(
+            post_id, limit=self.settings.get("comment_limit", 50),
+            known_count=data.get("num_comments"),
+        ), False
+
     # ---------------- Saved sync ----------------
 
     def start_sync(self):
@@ -480,6 +513,7 @@ class RedditArchiverApp(ctk.CTk):
 
         known = dedupe.build_post_index(paths["root"])
         new = skipped = upgraded = comments_saved = unavailable = reused = 0
+        comments_reused = 0
         saved_bytes = 0
         for index, child in enumerate(items, start=1):
             if not self.is_running:
@@ -544,12 +578,10 @@ class RedditArchiverApp(ctk.CTk):
                         unavailable += 1
                 new += 1
 
-            comments = None
-            if self.settings.get("fetch_comments"):
-                comments = self.client.fetch_comments(
-                    post_id, limit=self.settings.get("comment_limit", 50),
-                    known_count=data.get("num_comments"),
-                )
+            comments, kept = self._comments_for(
+                data, post_id, known.get(post_id))
+            if kept:
+                comments_reused += 1
 
             write_json(meta_path, normalize_post(
                 data, source="saved", media_files=media,
@@ -564,6 +596,9 @@ class RedditArchiverApp(ctk.CTk):
         if reused:
             self.log(f"{reused} post(s) reused media already in the archive "
                      f"({storage.human_size(saved_bytes)} not re-downloaded).")
+        if comments_reused:
+            self.log(f"{comments_reused} post(s) kept their existing comment "
+                     f"threads, saving that many requests.")
         if unavailable:
             self.log(
                 f"{unavailable} post(s) had media that no longer exists at the "
@@ -658,7 +693,7 @@ class RedditArchiverApp(ctk.CTk):
         # no wait, no second copy on disk.
         known = dedupe.build_post_index(archive_dir)
 
-        new = skipped = unavailable = reused = 0
+        new = skipped = unavailable = reused = comments_reused = 0
         saved_bytes = 0
         for index, child in enumerate(items, start=1):
             if not self.is_running:
@@ -692,12 +727,10 @@ class RedditArchiverApp(ctk.CTk):
                 if media:
                     known[post_id] = post_dir
 
-            comments = None
-            if self.settings.get("fetch_comments"):
-                comments = self.client.fetch_comments(
-                    post_id, limit=self.settings.get("comment_limit", 50),
-                    known_count=data.get("num_comments"),
-                )
+            comments, kept = self._comments_for(
+                data, post_id, known.get(post_id))
+            if kept:
+                comments_reused += 1
 
             write_json(meta_path, normalize_post(
                 data, source="profile-snapshot", username=target,
@@ -712,6 +745,9 @@ class RedditArchiverApp(ctk.CTk):
         if reused:
             parts.append(f"{reused} reused from an existing copy "
                          f"({storage.human_size(saved_bytes)} not re-downloaded)")
+        if comments_reused:
+            parts.append(f"{comments_reused} kept existing comments "
+                         f"(saved {comments_reused} requests)")
         self.log("Snapshot done. " + ", ".join(parts) + ".")
         if unavailable:
             self.log(f"{unavailable} post(s) had media deleted at the source.")
@@ -927,7 +963,7 @@ class RedditArchiverApp(ctk.CTk):
 
         threading.Thread(target=run, daemon=True).start()
 
-    def open_viewer(self):
+    def open_viewer(self, launch=True):
         archive_dir = self.settings["archive_dir"]
         viewer = os.path.join(archive_dir, "Archive.html")
         # resource_dir(), NOT APP_DIR: in a packaged build APP_DIR is the folder
@@ -955,8 +991,62 @@ class RedditArchiverApp(ctk.CTk):
         # Opened straight off disk. The viewer is a plain page with no runtime
         # dependency on this app -- it keeps working if you bookmark it, copy
         # the archive to another machine, or never open the app again.
+        if not launch:
+            return
         webbrowser.open(f"file:///{viewer.replace(os.sep, '/')}")
         self.log("Opened the viewer in your browser.")
+
+    def toggle_share(self):
+        """Serve the archive read-only to other devices on the same network."""
+        if self.share and self.share.running:
+            self.share.stop()
+            self.share = None
+            self.btn_share.configure(
+                text="Share on this network", fg_color="transparent"
+            )
+            self.log("Stopped sharing. The archive is no longer reachable "
+                     "from other devices.")
+            return
+
+        archive_dir = self.settings["archive_dir"]
+        self.open_viewer(launch=False)   # ensure Archive.html and the index exist
+
+        if not messagebox.askyesno(
+            "Share on this network",
+            "This makes your archive readable by ANY device on this WiFi.\n\n"
+            "There is no access code -- the address alone is enough. It is "
+            "read-only, so nothing can be deleted or changed through it, but "
+            "anyone on this network who opens that address can browse it.\n\n"
+            "Turn it off when you are done. Start sharing?",
+            parent=self,
+        ):
+            return
+
+        try:
+            self.share = share_server.ShareServer(archive_dir, log=self.log)
+            url = self.share.start()
+        except OSError as exc:
+            self.share = None
+            self.log(f"Could not start sharing: {exc}")
+            return
+
+        self.btn_share.configure(text="Stop sharing", fg_color=OK)
+        self.log("")
+        self.log("--- Sharing on your local network ---")
+        self.log(f"  {url}")
+        self.log("Open that on your phone while on the same WiFi. Anyone on "
+                 "this network can reach it, so turn it off when you are done.")
+        self.log("If the phone cannot connect, Windows Firewall is almost "
+                 "always the reason -- see the README.")
+        self.log("Sharing stops when you press the button again or close "
+                 "the app.")
+        self.log("")
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(url)
+            self.log("(the link has been copied to your clipboard)")
+        except tkinter.TclError:
+            pass
 
     def open_folder(self):
         path = self.settings["archive_dir"]
@@ -1066,6 +1156,25 @@ class SettingsDialog(ctk.CTkToplevel):
              "NOT FOUND — videos will download without sound and show no "
              "thumbnail. Leave blank to search PATH, or point this at "
              "ffmpeg.exe. Get it from https://www.gyan.dev/ffmpeg/builds/")
+        )
+
+        # --- comment freshness ---
+        self.age_label = ctk.CTkLabel(
+            body, text="", font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=FG, anchor="w",
+        )
+        self.age_label.pack(pady=(0, 2), **self.pad)
+        self.age_slider = ctk.CTkSlider(
+            body, from_=0, to=180, number_of_steps=36,
+            progress_color=ACCENT, button_color=ACCENT, command=self._age_changed,
+        )
+        self.age_slider.set(settings.get("comment_refresh_days", 30))
+        self.age_slider.pack(pady=(0, 4), **self.pad)
+        self._age_changed(self.age_slider.get())
+        self._hint(
+            "Refreshing re-reads comments for recent posts only; older ones "
+            "keep what is already archived. Reddit locks threads after six "
+            "months, so those can never change. Set to 0 to always re-fetch."
         )
 
         self.comments_switch = ctk.CTkSwitch(
@@ -1186,6 +1295,14 @@ class SettingsDialog(ctk.CTkToplevel):
                 text="New, empty archive location.", text_color=MUTED
             )
 
+    def _age_changed(self, value):
+        days = int(round(float(value)))
+        self.age_label.configure(
+            text=("Re-read comments for every post"
+                  if days == 0 else
+                  f"Only re-read comments for posts newer than {days} days")
+        )
+
     def _delay_changed(self, value):
         self.delay_label.configure(
             text=f"Request pace: {float(value):.1f}s between calls"
@@ -1256,6 +1373,7 @@ class SettingsDialog(ctk.CTkToplevel):
         settings["browser"] = self.selected_browser()
         settings["request_delay"] = round(float(self.delay_slider.get()), 1)
         settings["ffmpeg_path"] = self.ffmpeg_entry.get().strip()
+        settings["comment_refresh_days"] = int(round(float(self.age_slider.get())))
         self.app.settings = config.save(settings)
         self.app.log("Settings saved.")
 

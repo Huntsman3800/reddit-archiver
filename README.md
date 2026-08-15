@@ -132,6 +132,44 @@ archived it.
 Posts whose media has since been deleted show the reason rather than an empty
 card. The text and metadata are still there.
 
+## Speed
+
+Two things dominate a refresh, and both are avoided rather than optimised.
+
+**Media is never downloaded twice.** Snapshots live in dated folders, so
+refreshing a creator used to re-fetch their whole history. Anything already in
+the archive is hard-linked into the new snapshot instead: no request, no wait,
+and no second copy on disk.
+
+**Comments are only re-read while they can still change.** Reddit locks threads
+after six months, and older posts rarely gain comments, so posts past
+**Settings -> comment freshness** (default 30 days) keep the thread already
+archived. That was the single API call per post, so a refresh of settled
+profiles costs almost nothing. Set it to 0 to always re-fetch.
+
+> [!NOTE]
+> Because copies share storage, *sum of file sizes* is not disk usage. The app
+> counts each set of shared blocks once, so its figures match Explorer rather
+> than climbing on every refresh.
+
+## Sharing over your network
+
+**Share on this network** serves the archive read-only over loopback-free HTTP
+so you can browse it from a phone on the same WiFi. It supports byte ranges, so
+videos stream and seek properly.
+
+> [!WARNING]
+> There is no access code. Anyone on the network who opens the address can read
+> the archive while sharing is on. It is read-only — nothing can be deleted or
+> changed through it — but turn it off when you are done.
+
+`tools/share_folder.py` does the same for any folder on your machine, with a
+swipe-and-pinch gallery and a tray icon to stop it:
+
+```bash
+python tools/share_folder.py "D:\some folder"
+```
+
 ## Rate limiting
 
 Reddit enforces a *sliding window* limit, so a fixed delay can't work: a pace
