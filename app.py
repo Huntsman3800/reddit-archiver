@@ -196,6 +196,9 @@ class RedditArchiverApp(ctk.CTk):
         self.btn_refresh = self._button(
             sidebar, "Refresh all profiles", self.start_refresh_all
         )
+        self.btn_followed = self._button(
+            sidebar, "Snapshot followed users", self.start_snapshot_followed
+        )
 
         self._section(sidebar, "LIBRARY")
         self.btn_index = self._button(sidebar, "Rebuild index", self.start_reindex)
@@ -311,7 +314,7 @@ class RedditArchiverApp(ctk.CTk):
         state = "disabled" if running else "normal"
         for btn in (
             self.btn_sync, self.btn_backfill,
-            self.btn_snapshot, self.btn_refresh,
+            self.btn_snapshot, self.btn_refresh, self.btn_followed,
             self.btn_index, self.btn_thumbs, self.btn_health,
             self.btn_dedupe, self.btn_manage,
             self.btn_settings,
@@ -614,6 +617,64 @@ class RedditArchiverApp(ctk.CTk):
             self.log("Enter a username to snapshot.")
             return
         self._start_job(self.snapshot_profile, target)
+
+    def start_snapshot_followed(self):
+        self._start_job(self.snapshot_followed)
+
+    def snapshot_followed(self):
+        """Snapshot everyone you follow on Reddit, without typing any names.
+
+        Reddit has no 'following' endpoint: following someone subscribes you to
+        a hidden u_<username> subreddit, so the subscription list is the source.
+        """
+        self.set_status("Reading who you follow...")
+        self.log("--- Snapshotting followed users ---")
+
+        users = self.client.fetch_followed_users()
+        if not users:
+            self.log("No followed users found in your subscriptions.")
+            self.log("Follow someone on their profile page, then try again. "
+                     "(Subreddits are ignored -- only people are archived.)")
+            return
+
+        archive_dir = self.settings["archive_dir"]
+        already = set(snapshots.known_users(archive_dir))
+        fresh = [u for u in users if u not in already]
+
+        self.log(f"You follow {len(users)} user(s); "
+                 f"{len(fresh)} not archived yet.")
+        for name in users:
+            self.log(f"  u/{name}" + ("" if name in already else "   (new)"))
+
+        if not messagebox.askyesno(
+            "Snapshot followed users",
+            f"Archive all {len(users)} user(s) you follow?\n\n"
+            f"{len(fresh)} are new; the rest will be refreshed, which is quick "
+            f"because existing media and older comment threads are reused.\n\n"
+            f"You can press Stop at any point -- finished profiles are kept.",
+            parent=self,
+        ):
+            self.log("Cancelled.")
+            return
+
+        done = failed = 0
+        for index, name in enumerate(users, start=1):
+            if not self.is_running:
+                self.log("Stopped by user.")
+                break
+            self.log(f"\n=== u/{name} ({index}/{len(users)}) ===")
+            try:
+                self.snapshot_profile(name)
+                done += 1
+            except AuthError:
+                raise
+            except Exception as exc:
+                failed += 1
+                self.log(f"u/{name} failed: {exc!r}")
+
+        self.log(f"\nFinished {done} of {len(users)} followed user(s)."
+                 + (f" {failed} failed." if failed else ""))
+        self.set_status(f"Snapshotted {done} followed user(s)")
 
     def start_refresh_all(self):
         users = snapshots.known_users(self.settings["archive_dir"])

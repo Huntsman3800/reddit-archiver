@@ -428,6 +428,39 @@ class RedditClient:
             url += f"&after={after}"
         return self.fetch_json(url)
 
+    def fetch_followed_users(self):
+        """Usernames you follow, from your subscription list.
+
+        Following someone on Reddit subscribes you to a hidden subreddit named
+        u_<username>, which is why followed people appear alongside subreddits
+        on old.reddit.com/subreddits. There is no separate "following" API, so
+        the subscription listing is the source, filtered down to user profiles.
+
+        Returns a sorted list of usernames.
+        """
+        users = []
+        after = None
+        pages = 0
+        while not self.should_stop() and pages < 30:
+            page = self.fetch_listing(
+                "/subreddits/mine/subscriber.json", after=after
+            )
+            children = (page or {}).get("data", {}).get("children") or []
+            if not children:
+                break
+            for child in children:
+                data = child.get("data") or {}
+                name = _username_from_subreddit(data)
+                if name:
+                    users.append(name)
+            after = page["data"].get("after")
+            pages += 1
+            if not after:
+                break
+
+        # Reddit occasionally lists the same profile twice across pages.
+        return sorted(set(users), key=str.lower)
+
     # ---------------- Comments ----------------
 
     def fetch_comments(self, post_id, limit=50, depth=5, known_count=None):
@@ -681,6 +714,33 @@ class RedditClient:
             reason = message.split("\n")[0][:110]
         self.log(f"  media unavailable: {reason}")
         return reason
+
+
+def _username_from_subreddit(data):
+    """Pull a username out of a subreddit listing entry, or None.
+
+    A followed person appears as a subreddit named u_<username>. Reddit is not
+    consistent about which fields it fills in, so check several: subreddit_type
+    is the most reliable signal, the u_ prefix is the fallback, and the url
+    (/user/<name>/) preserves the real capitalisation.
+    """
+    if not isinstance(data, dict):
+        return None
+
+    display = data.get("display_name") or ""
+    is_user_profile = (
+        data.get("subreddit_type") == "user" or display.startswith("u_")
+    )
+    if not is_user_profile:
+        return None
+
+    url = data.get("url") or ""
+    match = re.search(r"/user/([^/]+)/?", url)
+    if match:
+        return match.group(1)
+    if display.startswith("u_"):
+        return display[2:]
+    return None
 
 
 def _clean_ext(url, default="jpg"):

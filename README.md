@@ -32,6 +32,7 @@ tells you when something you archived has since vanished from Reddit.
 |---|---|
 | **Saved sync** | Every saved post and comment, incrementally. Re-running skips what's current instead of re-downloading. |
 | **Profile snapshots** | Archive a user's entire submission history into a dated folder. Snapshot again later and keep both. |
+| **Follows in one click** | Pulls the list of people you follow straight from your Reddit account — no usernames to type. |
 | **Deletion detection** | Each snapshot is diffed against the last. Posts that disappeared from Reddit are flagged — your copy is now the only one. |
 | **Comment threads** | Full nested threads, collapsible in the viewer. |
 | **Offline viewer** | A single HTML file. No server, no build step, no internet. |
@@ -111,6 +112,7 @@ falling back to another.
 | **Backfill comments + upgrade** | Fetches comment threads for what's already archived. Never re-downloads media |
 | **Snapshot profile** | Archives one user's full submission history |
 | **Refresh all profiles** | Re-snapshots every creator you've captured, diffing each |
+| **Snapshot followed users** | Archives everyone you follow on Reddit, no typing |
 | **Rebuild index** | Regenerates the viewer's data files |
 | **Generate thumbnails** | Extracts poster frames for videos missing one |
 | **Check archive health** | Scans for problems, repairs safely on your confirmation |
@@ -131,6 +133,20 @@ archived it.
 
 Posts whose media has since been deleted show the reason rather than an empty
 card. The text and metadata are still there.
+
+### Archiving who you follow
+
+**Snapshot followed users** reads the people you follow from your own Reddit
+account and archives all of them, so there is no list of usernames to type.
+
+Reddit has no "following" API. Following someone subscribes you to a hidden
+subreddit named `u_<username>`, which is why followed people show up beside
+subreddits on [old.reddit.com/subreddits](https://old.reddit.com/subreddits/).
+The app reads that subscription list and keeps only the user profiles — real
+subreddits are ignored.
+
+It lists who it found and asks before starting. Anyone already archived is
+simply refreshed, which is cheap.
 
 ## Speed
 
